@@ -46,9 +46,9 @@ A one-dimensional histogram with four labeled bins tracking event counts through
 | 2 | `N_jets >= N` | Events with at least N jets after jet selection |
 | 3 | `HT > X GeV` | Events passing all cuts (= entries in `events` TTree) |
 
-### TH1 `slimmer_version` / `config_version`
+### TH1 `version`
 
-Single-bin `StrCategory` histograms whose bin label is the version string. Readable in ROOT as `h->GetXaxis()->GetBinLabel(1)`.
+Single-bin `StrCategory` histogram whose bin label is the version string from `metadata.version` in the config file. Readable in ROOT as `h->GetXaxis()->GetBinLabel(1)`.
 
 ### TTree `meta`
 
@@ -107,9 +107,4 @@ optional arguments:
 
 ## Versioning
 
-Two version strings are tracked:
-
-- **Slimmer version** (`VERSION` constant in `slim.py`): identifies the software. Current: `v1`.
-- **Config version** (`version` field in the JSON): identifies the cut configuration used.
-
-Both are written to the `meta` TTree in every output file so the provenance of any slimmed file can be checked without re-reading the input.
+The version is set once in the config JSON under `metadata.version` and written to the `version` histogram in every output file. Bump it whenever you change the cut configuration so output files are self-describing.

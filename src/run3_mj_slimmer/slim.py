@@ -38,8 +38,6 @@ import boost_histogram as bh
 import numpy as np
 import uproot
 
-VERSION = "v1"
-
 # All per-jet ScoutingPFJet branches as they appear in ScoutingNanoAOD.
 # px, py, pz, e are NOT stored in the file; they are computed and added.
 SCOUTING_PF_JET_BRANCHES = [
@@ -124,33 +122,6 @@ def _available(tree_keys: set, branches: list) -> list:
     return [b for b in branches if b in tree_keys]
 
 
-def _compute_cartesian(jets: ak.Array) -> ak.Array:
-    """Compute px, py, pz, e from pt/eta/phi/m and attach them as new fields.
-
-    These are not stored in ScoutingNanoAOD; coffea derives them via the vector
-    mixin. We compute and store them so downstream code (e.g. ML inference) can
-    read them directly from the slimmed file without a coffea dependency.
-    """
-    pt = jets["ScoutingPFJet_pt"]
-    eta = jets["ScoutingPFJet_eta"]
-    phi = jets["ScoutingPFJet_phi"]
-
-    px = pt * np.cos(phi)
-    py = pt * np.sin(phi)
-    pz = pt * np.sinh(eta)
-
-    if "ScoutingPFJet_m" in ak.fields(jets):
-        mass = jets["ScoutingPFJet_m"]
-        e = np.sqrt(px**2 + py**2 + pz**2 + mass**2)
-    else:
-        e = np.sqrt(px**2 + py**2 + pz**2)
-
-    jets = ak.with_field(jets, px, "ScoutingPFJet_px")
-    jets = ak.with_field(jets, py, "ScoutingPFJet_py")
-    jets = ak.with_field(jets, pz, "ScoutingPFJet_pz")
-    jets = ak.with_field(jets, e,  "ScoutingPFJet_e")
-    return jets
-
 
 def slim(
     input_path: str,
@@ -164,7 +135,7 @@ def slim(
     jet_pt_cut  = float(config["cuts"]["jet_pt_cut"])
     jet_eta_cut = float(config["cuts"]["jet_eta_cut"])
     min_jets    = int(config["cuts"]["min_jets"])
-    config_version = config["metadata"]["version"]
+    version = config["metadata"]["version"]
 
     with uproot.open(input_path) as in_file:
         if in_tree_name not in in_file:
@@ -183,17 +154,11 @@ def slim(
         if not jet_branches:
             sys.exit(f"No ScoutingPFJet branches found in tree '{in_tree_name}'.")
 
-        # px/py/pz/e are never stored; compute them if the kinematics are present.
-        need_cartesian = (
-            "ScoutingPFJet_px" not in tree_keys
-            and all(f"ScoutingPFJet_{c}" in tree_keys for c in ("pt", "eta", "phi"))
-        )
-
         read_branches = event_branches + jet_branches + optional_branches
 
         print(f"Input:   {input_path}  (tree: {in_tree_name})")
         print(f"Output:  {output_path}  (tree: events)")
-        print(f"Slimmer version: {VERSION}  |  Config version: {config_version}  ({config_path})")
+        print(f"Version: {version}  ({config_path})")
         print(
             f"Cuts:    jet pT > {jet_pt_cut} GeV | |eta| < {jet_eta_cut} | "
             f"N_jets >= {min_jets} | HT > {ht_cut} GeV"
@@ -201,7 +166,6 @@ def slim(
         print(
             f"Branches: {len(jet_branches)} jet, {len(event_branches)} event"
             + (f", {len(optional_branches)} optional" if optional_branches else "")
-            + ("  [will compute px/py/pz/e]" if need_cartesian else "")
         )
 
         # Cutflow: track events surviving each selection stage.
@@ -236,10 +200,6 @@ def slim(
                 )
                 jets = jets[jet_mask]
 
-                # Attach computed cartesian 4-vector components.
-                if need_cartesian:
-                    jets = _compute_cartesian(jets)
-
                 # Derived per-event quantities (after jet selection).
                 n_jets = ak.num(jets["ScoutingPFJet_pt"])
                 ht = ak.sum(jets["ScoutingPFJet_pt"], axis=1)
@@ -260,20 +220,25 @@ def slim(
                 for f in event_branches + optional_branches:
                     out_record[f] = chunk[f][event_mask]
 
-                out_record["nScoutingPFJet"] = ak.num(jets["ScoutingPFJet_pt"])
                 out_record["HT"] = ht
 
-                for f in ak.fields(jets):
-                    out_record[f] = jets[f]
+                # Write all jet fields as a single nested branch so uproot creates
+                # one nScoutingPFJet count instead of a separate count per field.
+                # Fields are accessible as ScoutingPFJet.pt, ScoutingPFJet.eta, etc.
+                out_record["ScoutingPFJet"] = ak.zip({
+                    f[len("ScoutingPFJet_"):]: jets[f] for f in ak.fields(jets)
+                })
 
                 n_kept = int(ak.sum(event_mask))
                 total_out += n_kept
 
                 if out_tree is None:
-                    out_file["events"] = out_record
+                    out_file.mktree(
+                        "events",
+                        {name: arr.type for name, arr in out_record.items()},
+                    )
                     out_tree = out_file["events"]
-                else:
-                    out_tree.extend(out_record)
+                out_tree.extend(out_record)
 
                 print(
                     f"  {total_in:>10,} events read  |  {total_out:>10,} kept"
@@ -290,24 +255,22 @@ def slim(
                 cutflow_hist.view()[i] = float(count)
             out_file["cutflow"] = cutflow_hist
 
-            # --- Version histograms ---
-            # StrCategory histograms are the reliable way to store string metadata
-            # in uproot; byte-string TTree branches cause RNTuple routing errors.
-            for hist_name, value in (
-                ("slimmer_version", VERSION),
-                ("config_version",  config_version),
-            ):
-                h = bh.Histogram(bh.axis.StrCategory([value]), storage=bh.storage.Double())
-                h.view()[0] = 1.0
-                out_file[hist_name] = h
+            # --- Version histogram ---
+            # StrCategory histogram is the reliable way to store a string in uproot;
+            # byte-string TTree branches trigger the RNTuple routing path.
+            version_hist = bh.Histogram(bh.axis.StrCategory([version]), storage=bh.storage.Double())
+            version_hist.view()[0] = 1.0
+            out_file["version"] = version_hist
 
             # --- Metadata TTree (one entry, numeric values only) ---
-            out_file["meta"] = {
+            meta_record = {
                 "ht_cut":      np.array([ht_cut],      dtype=np.float32),
                 "jet_pt_cut":  np.array([jet_pt_cut],  dtype=np.float32),
                 "jet_eta_cut": np.array([jet_eta_cut], dtype=np.float32),
                 "min_jets":    np.array([min_jets],    dtype=np.int32),
             }
+            out_file.mktree("meta", {name: arr.dtype for name, arr in meta_record.items()})
+            out_file["meta"].extend(meta_record)
 
     print(
         f"\nDone.   {total_in:,} events in  ->  {total_out:,} events out"
