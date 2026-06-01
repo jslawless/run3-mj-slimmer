@@ -1,0 +1,11 @@
+{
+    "metadata": {
+        "version": "v1"
+    },
+    "cuts": {
+        "ht_cut":      550.0,
+        "jet_pt_cut":  30.0,
+        "jet_eta_cut": 2.4,
+        "min_jets":    6
+    }
+}
