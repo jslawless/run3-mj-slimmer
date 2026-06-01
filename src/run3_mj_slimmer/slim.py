@@ -8,8 +8,11 @@ and writes a slimmed ROOT file containing:
   - TTree 'meta'    : slimmer version, config version, input file, cut parameters
 
 Usage:
-    python slim.py input.root output.root config.json
-    python slim.py input.root output.root config.json --tree Events --chunk-size 100000
+    python slim.py input.root config.json
+    python slim.py input.root config.json --tree Events --chunk-size 100000
+
+Output file is written to the current directory as slimmed_<input basename>,
+e.g. input /path/to/ScoutingNanoAOD.root -> ./slimmed_ScoutingNanoAOD.root
 
 Config JSON format:
     {
@@ -27,6 +30,7 @@ Config JSON format:
 
 import argparse
 import json
+import os
 import sys
 
 import awkward as ak
@@ -286,20 +290,19 @@ def slim(
                 cutflow_hist.view()[i] = float(count)
             out_file["cutflow"] = cutflow_hist
 
-            # --- Metadata TTree (one entry) ---
+            # --- Version histograms ---
+            # StrCategory histograms are the reliable way to store string metadata
+            # in uproot; byte-string TTree branches cause RNTuple routing errors.
+            for hist_name, value in (
+                ("slimmer_version", VERSION),
+                ("config_version",  config_version),
+            ):
+                h = bh.Histogram(bh.axis.StrCategory([value]), storage=bh.storage.Double())
+                h.view()[0] = 1.0
+                out_file[hist_name] = h
+
+            # --- Metadata TTree (one entry, numeric values only) ---
             out_file["meta"] = {
-                "slimmer_version": np.array(
-                    [VERSION.encode("ascii")], dtype=f"S{len(VERSION)}"
-                ),
-                "config_version": np.array(
-                    [config_version.encode("ascii")], dtype=f"S{len(config_version)}"
-                ),
-                "config_file": np.array(
-                    [config_path.encode("ascii")], dtype=f"S{min(len(config_path), 255)}"
-                ),
-                "input_file": np.array(
-                    [input_path.encode("ascii")], dtype=f"S{min(len(input_path), 255)}"
-                ),
                 "ht_cut":      np.array([ht_cut],      dtype=np.float32),
                 "jet_pt_cut":  np.array([jet_pt_cut],  dtype=np.float32),
                 "jet_eta_cut": np.array([jet_eta_cut], dtype=np.float32),
@@ -321,7 +324,6 @@ def main() -> None:
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument("input", help="Input ScoutingNanoAOD ROOT file")
-    parser.add_argument("output", help="Output slimmed ROOT file")
     parser.add_argument("config", help="JSON file containing cut configuration")
     parser.add_argument(
         "--tree", default="Events", metavar="NAME",
@@ -335,9 +337,11 @@ def main() -> None:
 
     cfg = load_config(args.config)
 
+    output_path = "slimmed_" + os.path.basename(args.input)
+
     slim(
         input_path=args.input,
-        output_path=args.output,
+        output_path=output_path,
         config=cfg,
         config_path=args.config,
         in_tree_name=args.tree,

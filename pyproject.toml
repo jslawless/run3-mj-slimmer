@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "run3-mj-slimmer"
+version = "1.0.0"
+description = "ScoutingNanoAOD slimmer for the 6-jet multijet analysis"
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = [
+    "uproot>=5.0",
+    "awkward>=2.0",
+    "numpy>=1.20",
+    "boost-histogram>=1.3",
+]
+
+[project.scripts]
+run3-mj-slimmer = "run3_mj_slimmer.slim:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
