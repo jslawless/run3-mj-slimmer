@@ -32,7 +32,7 @@ import argparse
 import json
 
 
-def configure_batch(logdir, names, transfer, outdir, cpu, queue, ram):
+def configure_batch(logdir, names, transfer, eosoutdir, cpu, queue, ram):
     return f"""\
 universe                = vanilla
 executable              = {logdir}/$(name).sh
@@ -72,9 +72,6 @@ pip install --quiet {WHEEL}
 echo
 # mkdir -p output_files
 {RUN_COMMANDS}
-"""
-
-EXECUTABLE_TEMPLATE2 = """\
 echo "what directory am I in?"
 pwd
 echo "List all root files = "
@@ -82,8 +79,11 @@ ls *.root
 echo "List all files"
 ls -alh
 echo "*******************************************"
-OUTDIR=root://cmseos.fnal.gov//store/group/lpcmultijets/johnny/slimmed_qcd 
+OUTDIR=root://cmseos.fnal.gov/{EOSOUTDIR}
 echo "xrdcp output for condor to "
+"""
+
+EXECUTABLE_TEMPLATE2 ="""\
 echo $OUTDIR
 for FILE in *.root
 do
@@ -111,14 +111,13 @@ class Fileset:
     def __init__(self, args):
         self.infile = args.inFile
         self.nf_per_job = args.nfPerJob
-        self.outdir = args.outdir
+        self.eosoutdir = args.eosoutdir
         self.logdir = args.logdir
         self.fileset = {}
         self.jobs = []
 
         self._read()
         self._split()
-        self._ensure_outdir()
         os.makedirs(self.logdir, exist_ok=True)
 
     def _read(self):
@@ -142,25 +141,11 @@ class Fileset:
             total += len(subjobs)
         print(f"\n  Total: {total} jobs\n")
 
-    def _ensure_outdir(self):
-        outdir = self.outdir
-        if "root://cmseos.fnal.gov/" in outdir:
-            if "cmslpc" in socket.gethostname():
-                eos = outdir.split(".fnal.gov/")[1]
-                path = "/eos/uscms" + eos
-                if not os.path.exists(path):
-                    print(f"Creating EOS directory: {eos}")
-                    os.system(f"eosmkdir -p {eos}")
-            else:
-                print(f"\033[1;31mWarning: cannot verify output directory exists: {outdir}\033[0m")
-        elif outdir and outdir != ".":
-            os.makedirs(outdir, exist_ok=True)
-
 
 class Batch:
     def __init__(self, jobs, args):
         self.jobs = jobs
-        self.outdir = args.outdir
+        self.eosoutdir = args.eosoutdir
         self.logdir = args.logdir
         self.cpu = args.cpu
         self.queue = args.queue
@@ -190,7 +175,7 @@ class Batch:
                 exe = EXECUTABLE_TEMPLATE.format(
                     WHEEL=wheel_basename,
                     RUN_COMMANDS="\n".join(run_cmds),
-                    OUTDIR=self.outdir,
+                    EOSOUTDIR=self.eosoutdir,
                 )
                 exe = exe + EXECUTABLE_TEMPLATE2
                 path = f"{self.logdir}/{name}.sh"
@@ -211,7 +196,7 @@ class Batch:
             logdir=self.logdir,
             names=names.strip(),
             transfer=transfer,
-            outdir=self.outdir,
+            eosoutdir=self.eosoutdir,
             cpu=self.cpu,
             queue=self.queue,
             ram=self.ram,
@@ -240,7 +225,7 @@ if __name__ == "__main__":
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument("-i", "--inFile",   required=True,  help="Coffea-style fileset JSON")
-    parser.add_argument("-o", "--outdir",   required=True,  help="Output directory (local or EOS xrootd URL)")
+    parser.add_argument("-o", "--eosoutdir",   required=True,  help="EOS Output directory")
     parser.add_argument("--config",         required=True,  help="run3-mj-slimmer config JSON")
     parser.add_argument("--wheel",          required=True,  help="Pre-built run3-mj-slimmer .whl file")
     parser.add_argument("-n", "--nfPerJob", type=int, default=1, help="Files per job")
