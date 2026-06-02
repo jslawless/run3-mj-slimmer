@@ -1,0 +1,10 @@
+{
+    "QCD-4Jets_HT-1000to1200_TuneCP5_13p6TeV_madgraphMLM-pythia8": {
+        "files": {
+            "root://cmsxrootd.fnal.gov//store/user/jodervan/ScoutNano_QCD4Jets_Run3Winter24/QCD-4Jets_HT-1000to1200_TuneCP5_13p6TeV_madgraphMLM-pythia8/ScoutNano_QCD4Jets_HT1000to1200_withGen_v2/260527_132506/0000/ScoutNano_test_1.root": "Events",
+            "root://cmsxrootd.fnal.gov//store/user/jodervan/ScoutNano_QCD4Jets_Run3Winter24/QCD-4Jets_HT-1000to1200_TuneCP5_13p6TeV_madgraphMLM-pythia8/ScoutNano_QCD4Jets_HT1000to1200_withGen_v2/260527_132506/0000/ScoutNano_test_10.root": "Events",
+            "root://cmsxrootd.fnal.gov//store/user/jodervan/ScoutNano_QCD4Jets_Run3Winter24/QCD-4Jets_HT-1000to1200_TuneCP5_13p6TeV_madgraphMLM-pythia8/ScoutNano_QCD4Jets_HT1000to1200_withGen_v2/260527_132506/0000/ScoutNano_test_100.root": "Events",
+            "root://cmsxrootd.fnal.gov//store/user/jodervan/ScoutNano_QCD4Jets_Run3Winter24/QCD-4Jets_HT-1000to1200_TuneCP5_13p6TeV_madgraphMLM-pythia8/ScoutNano_QCD4Jets_HT1000to1200_withGen_v2/260527_132506/0000/ScoutNano_test_101.root": "Events"
+	}
+    }
+}
