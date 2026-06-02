@@ -79,6 +79,14 @@ OPTIONAL_EVENT_BRANCHES = [
     "ScoutingMET_phi",
 ]
 
+# Generator-level ak4 jets (MC-only). Passed through without selection.
+GEN_JET_BRANCHES = [
+    "GenJet_pt",
+    "GenJet_eta",
+    "GenJet_phi",
+    "GenJet_mass",
+]
+
 
 _REQUIRED_METADATA_KEYS = {
     "version": str,
@@ -150,11 +158,12 @@ def slim(
         jet_branches = _available(tree_keys, SCOUTING_PF_JET_BRANCHES)
         event_branches = _available(tree_keys, EVENT_BRANCHES)
         optional_branches = _available(tree_keys, OPTIONAL_EVENT_BRANCHES)
+        gen_jet_branches = _available(tree_keys, GEN_JET_BRANCHES)
 
         if not jet_branches:
             sys.exit(f"No ScoutingPFJet branches found in tree '{in_tree_name}'.")
 
-        read_branches = event_branches + jet_branches + optional_branches
+        read_branches = event_branches + jet_branches + optional_branches + gen_jet_branches
 
         print(f"Input:   {input_path}  (tree: {in_tree_name})")
         print(f"Output:  {output_path}  (tree: events)")
@@ -166,6 +175,7 @@ def slim(
         print(
             f"Branches: {len(jet_branches)} jet, {len(event_branches)} event"
             + (f", {len(optional_branches)} optional" if optional_branches else "")
+            + (f", {len(gen_jet_branches)} gen jet" if gen_jet_branches else "")
         )
 
         # Cutflow: track events surviving each selection stage.
@@ -228,6 +238,13 @@ def slim(
                 out_record["ScoutingPFJet"] = ak.zip({
                     f[len("ScoutingPFJet_"):]: jets[f] for f in ak.fields(jets)
                 })
+
+                if gen_jet_branches:
+                    gen_jets = ak.zip({
+                        f[len("GenJet_"):]: chunk[f][event_mask]
+                        for f in gen_jet_branches
+                    })
+                    out_record["GenJet"] = gen_jets
 
                 n_kept = int(ak.sum(event_mask))
                 total_out += n_kept
