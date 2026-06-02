@@ -32,6 +32,8 @@ Takes a ScoutingNanoAOD ROOT file and produces a smaller ROOT file containing on
 | `ScoutingPFJet_HFHadronMultiplicity` | jagged | HF hadron count |
 | `ScoutingRho_fixedGridRhoFastjetAll` | scalar | Pileup rho (if present) |
 | `ScoutingMET_pt`, `ScoutingMET_phi` | scalar | MET (if present) |
+| `nGenJet` | scalar `int32` | Generator-level ak4 jet multiplicity (MC-only) |
+| `GenJet_pt/eta/phi/mass` | jagged | Generator-level ak4 jet 4-vector (MC-only) |
 
 Branches not present in the input file are silently skipped.
 
