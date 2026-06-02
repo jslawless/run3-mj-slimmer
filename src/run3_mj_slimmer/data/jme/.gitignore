@@ -1,0 +1,5 @@
+# Real JME correction files are large/versioned and fetched per campaign;
+# do not commit them. Keep this directory (and its README) tracked.
+*.txt
+*.txt.gz
+!README.md
