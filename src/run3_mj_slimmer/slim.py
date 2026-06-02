@@ -296,11 +296,18 @@ def main() -> None:
         "--chunk-size", type=int, default=100_000, metavar="N",
         help="Events per processing chunk",
     )
+    parser.add_argument(
+        "--output-tag", type=str, default="",
+        help="Optional tag added to the output file name",
+    )
     args = parser.parse_args()
 
     cfg = load_config(args.config)
 
-    output_path = "slimmed_" + os.path.basename(args.input)
+    if args.output_tag:
+        output_path = "slimmed" + "_" + args.output_tag + "_" + os.path.basename(args.input)
+    else:
+        output_path = "slimmed" + "_" + os.path.basename(args.input)
 
     slim(
         input_path=args.input,

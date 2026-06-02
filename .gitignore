@@ -2,4 +2,6 @@
 *.root
 *.out
 *.err
-*.log
+*log
+*pythia8*txt
+test*

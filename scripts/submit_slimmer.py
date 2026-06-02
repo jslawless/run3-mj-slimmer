@@ -42,9 +42,6 @@ error                   = {logdir}/log_$(ClusterId)_$(name).err
 log                     = {logdir}/log_$(ClusterId)_$(name).log
 Should_Transfer_Files   = YES
 transfer_input_files    = {transfer}
-output_destination      = {outdir}
-transfer_output_files   = output_files/
-when_to_transfer_output = ON_SUCCESS
 RequestCPUs             = {cpu}
 +JobFlavour             = {queue}
 request_memory          = {ram}
@@ -73,11 +70,37 @@ pip install --quiet {WHEEL}
 
 ## Run
 echo
-mkdir -p output_files
+# mkdir -p output_files
 {RUN_COMMANDS}
+"""
 
-echo
-echo "Output destination: {OUTDIR}"
+EXECUTABLE_TEMPLATE2 = """\
+echo "what directory am I in?"
+pwd
+echo "List all root files = "
+ls *.root
+echo "List all files"
+ls -alh
+echo "*******************************************"
+OUTDIR=root://cmseos.fnal.gov//store/group/lpcmultijets/johnny/slimmed_qcd 
+echo "xrdcp output for condor to "
+echo $OUTDIR
+for FILE in *.root
+do
+  echo "xrdcp -f ${FILE} ${OUTDIR}/${FILE}"
+  echo "${FILE}" 
+  echo "${OUTDIR}"
+ xrdcp -f ${FILE} ${OUTDIR}/${FILE} 2>&1
+  XRDEXIT=$?
+  if [[ $XRDEXIT -ne 0 ]]; then
+    rm *.root ###note if you do this locally you remove possibly IMPORTANT ROOT FILES
+    ### always be careful with "rm"
+    echo "exit code $XRDEXIT, failure in xrdcp"
+    exit $XRDEXIT
+  fi
+  rm ${FILE} ###note if you do this locally you remove possibly IMPORTANT ROOT FILES
+    ### always be careful with "rm"
+done
 
 echo
 echo "Ending job on " `date`
@@ -162,13 +185,14 @@ class Batch:
                     run_cmds.append(
                         f"run3-mj-slimmer {filepath} {config_basename}"
                         f" --tree {tree_name}"
-                        f" && mv slimmed_{basename} output_files/"
+                        f" --output-tag {name}"
                     )
                 exe = EXECUTABLE_TEMPLATE.format(
                     WHEEL=wheel_basename,
                     RUN_COMMANDS="\n".join(run_cmds),
                     OUTDIR=self.outdir,
                 )
+                exe = exe + EXECUTABLE_TEMPLATE2
                 path = f"{self.logdir}/{name}.sh"
                 with open(path, "w") as f:
                     f.write(exe)
