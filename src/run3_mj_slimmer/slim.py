@@ -87,6 +87,18 @@ GEN_JET_BRANCHES = [
     "GenJet_mass",
 ]
 
+# Generator-level particles (MC-only). Passed through without selection.
+GEN_PART_BRANCHES = [
+    "GenPart_pt",
+    "GenPart_eta",
+    "GenPart_phi",
+    "GenPart_mass",
+    "GenPart_pdgId",
+    "GenPart_status",
+    "GenPart_charge",
+    "GenPart_genPartIdxMother",
+]
+
 
 _REQUIRED_METADATA_KEYS = {
     "version": str,
@@ -159,11 +171,15 @@ def slim(
         event_branches = _available(tree_keys, EVENT_BRANCHES)
         optional_branches = _available(tree_keys, OPTIONAL_EVENT_BRANCHES)
         gen_jet_branches = _available(tree_keys, GEN_JET_BRANCHES)
+        gen_part_branches = _available(tree_keys, GEN_PART_BRANCHES)
 
         if not jet_branches:
             sys.exit(f"No ScoutingPFJet branches found in tree '{in_tree_name}'.")
 
-        read_branches = event_branches + jet_branches + optional_branches + gen_jet_branches
+        read_branches = (
+            event_branches + jet_branches + optional_branches
+            + gen_jet_branches + gen_part_branches
+        )
 
         print(f"Input:   {input_path}  (tree: {in_tree_name})")
         print(f"Output:  {output_path}  (tree: events)")
@@ -176,6 +192,7 @@ def slim(
             f"Branches: {len(jet_branches)} jet, {len(event_branches)} event"
             + (f", {len(optional_branches)} optional" if optional_branches else "")
             + (f", {len(gen_jet_branches)} gen jet" if gen_jet_branches else "")
+            + (f", {len(gen_part_branches)} gen part" if gen_part_branches else "")
         )
 
         # Cutflow: track events surviving each selection stage.
@@ -245,6 +262,13 @@ def slim(
                         for f in gen_jet_branches
                     })
                     out_record["GenJet"] = gen_jets
+
+                if gen_part_branches:
+                    gen_parts = ak.zip({
+                        f[len("GenPart_"):]: chunk[f][event_mask]
+                        for f in gen_part_branches
+                    })
+                    out_record["GenPart"] = gen_parts
 
                 n_kept = int(ak.sum(event_mask))
                 total_out += n_kept
