@@ -17,7 +17,9 @@ dependencies = [
     # JEC/JER via coffea.jetmet_tools driven by JME POG .txt files.
     # Pinned for a reproducible jetmet_tools API; this release is compatible
     # with the modern numpy/scipy/numba stack (coffea 2024.x needs old scipy).
-    "coffea==2026.5.0",
+    # NOTE: must be a version published on PyPI (2026.5.0 is not), since condor
+    # jobs build a fresh venv from PyPI; latest PyPI release as of writing.
+    "coffea==2025.11.0",
 ]
 
 [project.optional-dependencies]
