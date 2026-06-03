@@ -11,8 +11,6 @@
     "corrections": {
         "enabled": true,
         "is_mc": false,
-        "algo": "AK4PFHLT",
-        "era": "Summer22_V2",
         "selection_mode": "nominal",
         "files_dir": "data/jme",
         "jec": {
