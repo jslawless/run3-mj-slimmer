@@ -167,10 +167,13 @@ class Batch:
                 for filepath, tree in files:
                     tree_name = tree if tree else self.default_tree
                     basename = os.path.basename(filepath)
+                    # Tag with the dataset name only (not the per-job index):
+                    # the input basename already makes each output unique, so
+                    # the output is slimmed_<dataset>_<input basename>.
                     run_cmds.append(
                         f"run3-mj-slimmer {filepath} {config_basename}"
                         f" --tree {tree_name}"
-                        f" --output-tag {name}"
+                        f" --output-tag {dataset}"
                     )
                 exe = EXECUTABLE_TEMPLATE.format(
                     WHEEL=wheel_basename,
