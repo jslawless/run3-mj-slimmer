@@ -2,3 +2,5 @@ uproot>=5.0
 awkward>=2.0
 numpy>=1.20
 boost-histogram>=1.3
+fsspec_xrootd
+coffea==2026.5.0
