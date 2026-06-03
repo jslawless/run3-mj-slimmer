@@ -8,6 +8,12 @@ from a pre-built wheel and runs it on its assigned files.
 Build the wheel before submitting:
     pip wheel /path/to/run3-mj-slimmer -w .
 
+To run with JEC/JER corrections, drop the JME .txt files into
+src/run3_mj_slimmer/data/jme/ BEFORE building the wheel: they are packaged into
+the wheel and resolved automatically on the worker node (no extra transfers).
+Each job then `pip install`s the wheel, which pulls coffea (a large dependency,
+hence the higher request_disk default).
+
 Submit:
     python submit_slimmer.py \\
         -i fileset.json \\
@@ -32,7 +38,7 @@ import argparse
 import json
 
 
-def configure_batch(logdir, names, transfer, eosoutdir, cpu, queue, ram):
+def configure_batch(logdir, names, transfer, eosoutdir, cpu, queue, ram, disk):
     return f"""\
 universe                = vanilla
 executable              = {logdir}/$(name).sh
@@ -45,6 +51,7 @@ transfer_input_files    = {transfer}
 RequestCPUs             = {cpu}
 +JobFlavour             = {queue}
 request_memory          = {ram}
+request_disk            = {disk}
 
 queue name from (
 {names}
@@ -150,6 +157,7 @@ class Batch:
         self.cpu = args.cpu
         self.queue = args.queue
         self.ram = args.memory
+        self.disk = args.disk
         self.config = args.config
         self.wheel = args.wheel
         self.default_tree = args.tree
@@ -200,6 +208,7 @@ class Batch:
             cpu=self.cpu,
             queue=self.queue,
             ram=self.ram,
+            disk=self.disk,
         )
         with open(f"{self.logdir}/submit.sub", "w") as f:
             f.write(config)
@@ -234,6 +243,7 @@ if __name__ == "__main__":
     parser.add_argument("--cpu",    type=int, default=1, help="CPUs per job")
     parser.add_argument("--queue",  default="tomorrow", help="HTCondor JobFlavour")
     parser.add_argument("--memory", default="4GB",      help="Memory per job")
+    parser.add_argument("--disk",   default="6GB",      help="Disk per job (coffea/numba venv is large)")
     parser.add_argument("--exec",   action="store_true", help="Submit jobs immediately after writing")
 
     args = parser.parse_args()

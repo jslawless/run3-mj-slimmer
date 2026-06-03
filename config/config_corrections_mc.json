@@ -1,0 +1,29 @@
+{
+    "metadata": {
+        "version": "v2-jec-mc"
+    },
+    "cuts": {
+        "ht_cut":      400.0,
+        "jet_pt_cut":  20.0,
+        "jet_eta_cut": 2.4,
+        "min_jets":    6
+    },
+    "corrections": {
+        "enabled": true,
+        "is_mc": true,
+        "algo": "AK4PFHLT",
+        "era": "Summer22_22Sep2023_V2",
+        "selection_mode": "nominal",
+        "files_dir": "data/jme",
+        "jec": {
+            "L1FastJet":  "Summer22_22Sep2023_V2_MC_L1FastJet_AK4PFHLT.jec.txt",
+            "L2Relative": "Summer22_22Sep2023_V2_MC_L2Relative_AK4PFHLT.jec.txt",
+            "L3Absolute": "Summer22_22Sep2023_V2_MC_L3Absolute_AK4PFHLT.jec.txt"
+        },
+        "junc": "Summer22_22Sep2023_V2_MC_Uncertainty_AK4PFHLT.junc.txt",
+        "jer": {
+            "PtResolution": "Summer22_JRV1_MC_PtResolution_AK4PFHLT.jr.txt",
+            "SF":           "Summer22_JRV1_MC_SF_AK4PFHLT.jersf.txt"
+        }
+    }
+}

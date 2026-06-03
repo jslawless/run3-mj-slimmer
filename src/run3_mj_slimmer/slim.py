@@ -135,11 +135,59 @@ def load_config(config_path: str) -> dict:
                     f"expected {expected}, got {type(cfg[section][key]).__name__}"
                 )
 
+    _validate_corrections(cfg.get("corrections"))
+
     return cfg
+
+
+def _validate_corrections(corr: dict) -> None:
+    """Validate the optional 'corrections' config block (absent => disabled)."""
+    if corr is None:
+        return
+    if not isinstance(corr, dict):
+        sys.exit("Config 'corrections' must be an object.")
+    if not corr.get("enabled"):
+        return
+
+    jec = corr.get("jec")
+    if not isinstance(jec, dict):
+        sys.exit("Config 'corrections.jec' must be an object mapping level -> file.")
+    for lvl in ("L1FastJet", "L2Relative", "L3Absolute"):
+        if lvl not in jec:
+            sys.exit(f"Config 'corrections.jec' missing required level: '{lvl}'")
+
+    if not corr.get("junc"):
+        sys.exit("Config 'corrections.junc' (JES Uncertainty file) is required.")
+
+    mode = corr.get("selection_mode", "nominal")
+    if mode not in ("nominal", "loose_or"):
+        sys.exit("Config 'corrections.selection_mode' must be 'nominal' or 'loose_or'.")
+
+    # When is_mc is given explicitly we can fully validate now; otherwise the
+    # MC/data-specific files are checked at runtime once the input is inspected.
+    is_mc = corr.get("is_mc")
+    if is_mc is True:
+        jer = corr.get("jer")
+        if not isinstance(jer, dict) or "PtResolution" not in jer or "SF" not in jer:
+            sys.exit(
+                "Config 'corrections.jer' with 'PtResolution' and 'SF' is required for MC."
+            )
+    elif is_mc is False:
+        if "L2L3Residual" not in jec:
+            sys.exit("Config 'corrections.jec.L2L3Residual' is required for data.")
 
 
 def _available(tree_keys: set, branches: list) -> list:
     return [b for b in branches if b in tree_keys]
+
+
+def _peek_run(tree):
+    """Read the first 'run' value as an IOV hint for data; None if unavailable."""
+    try:
+        arr = tree["run"].array(entry_stop=1, library="np")
+        return int(arr[0]) if len(arr) else None
+    except Exception:
+        return None
 
 
 
@@ -150,6 +198,7 @@ def slim(
     config_path: str,
     in_tree_name: str,
     chunk_size: int,
+    corrections_enabled: bool = False,
 ) -> None:
     ht_cut      = float(config["cuts"]["ht_cut"])
     jet_pt_cut  = float(config["cuts"]["jet_pt_cut"])
@@ -181,6 +230,24 @@ def slim(
             + gen_jet_branches + gen_part_branches
         )
 
+        # --- JEC/JER corrections setup (factory built once, before the loop) ---
+        factory = None
+        corr_cfg = config.get("corrections", {}) or {}
+        is_mc = bool(gen_jet_branches)
+        selection_mode = "nominal"
+        if corrections_enabled:
+            from run3_mj_slimmer.corrections import JetCorrectionFactory, RHO_BRANCH
+
+            if RHO_BRANCH not in optional_branches:
+                sys.exit(
+                    f"Corrections enabled but '{RHO_BRANCH}' is not in the input tree; "
+                    "it is required for the L1FastJet correction."
+                )
+            is_mc = bool(corr_cfg.get("is_mc", bool(gen_jet_branches)))
+            selection_mode = corr_cfg.get("selection_mode", "nominal")
+            run_hint = None if is_mc else _peek_run(tree)
+            factory = JetCorrectionFactory(corr_cfg, is_mc=is_mc, run=run_hint)
+
         print(f"Input:   {input_path}  (tree: {in_tree_name})")
         print(f"Output:  {output_path}  (tree: events)")
         print(f"Version: {version}  ({config_path})")
@@ -194,6 +261,14 @@ def slim(
             + (f", {len(gen_jet_branches)} gen jet" if gen_jet_branches else "")
             + (f", {len(gen_part_branches)} gen part" if gen_part_branches else "")
         )
+        if factory is not None:
+            print(
+                f"Corrections: ENABLED ({'MC' if is_mc else 'DATA'}) | "
+                f"mode={selection_mode} | {len(factory.resolved_files)} JME files | "
+                f"variations={factory.uncertainties}"
+            )
+        else:
+            print("Corrections: disabled")
 
         # Cutflow: track events surviving each selection stage.
         # Index 0 = all events, index 3 = final output (matches events TTree).
@@ -220,57 +295,135 @@ def slim(
                 jet_fields = {f: chunk[f] for f in jet_branches}
                 jets = ak.zip(jet_fields)
 
-                # Jet-level selection: pT and |eta|
-                jet_mask = (
-                    (jets["ScoutingPFJet_pt"] > jet_pt_cut) &
-                    (abs(jets["ScoutingPFJet_eta"]) < jet_eta_cut)
-                )
-                jets = jets[jet_mask]
+                if factory is None:
+                    # ---- Legacy path: select on raw jet pT, pass jets through ----
+                    jet_mask = (
+                        (jets["ScoutingPFJet_pt"] > jet_pt_cut) &
+                        (abs(jets["ScoutingPFJet_eta"]) < jet_eta_cut)
+                    )
+                    jets = jets[jet_mask]
+                    n_jets = ak.num(jets["ScoutingPFJet_pt"])
+                    ht = ak.sum(jets["ScoutingPFJet_pt"], axis=1)
+                    cutflow_counts[1] += int(ak.sum(n_jets >= 1))
+                    cutflow_counts[2] += int(ak.sum(n_jets >= min_jets))
+                    keep = (n_jets >= min_jets) & (ht > ht_cut)
+                    cutflow_counts[3] += int(ak.sum(keep))
+                    jets = jets[keep]
+                    ht_out = ht[keep]
+                    jet_out = {
+                        f[len("ScoutingPFJet_"):]: jets[f] for f in ak.fields(jets)
+                    }
+                else:
+                    # ---- Corrected path: apply JEC/JER before the selection ----
+                    short = ak.zip({
+                        "pt":   jets["ScoutingPFJet_pt"],
+                        "mass": jets["ScoutingPFJet_m"],
+                        "eta":  jets["ScoutingPFJet_eta"],
+                        "phi":  jets["ScoutingPFJet_phi"],
+                        "area": jets["ScoutingPFJet_jetArea"],
+                    })
+                    gen = None
+                    if is_mc and gen_jet_branches:
+                        gen = ak.zip({
+                            f[len("GenJet_"):]: chunk[f] for f in gen_jet_branches
+                        })
+                    corr = factory.build_jets(short, rho=chunk[RHO_BRANCH], gen_jets=gen)
 
-                # Derived per-event quantities (after jet selection).
-                n_jets = ak.num(jets["ScoutingPFJet_pt"])
-                ht = ak.sum(jets["ScoutingPFJet_pt"], axis=1)
+                    # nominal + systematic per-jet pT variations
+                    var_pt = {"nominal": corr.pt}
+                    var_pt["jesUp"]   = corr["JES_jes"].up.pt
+                    var_pt["jesDown"] = corr["JES_jes"].down.pt
+                    if is_mc:
+                        var_pt["jerUp"]   = corr["JER"].up.pt
+                        var_pt["jerDown"] = corr["JER"].down.pt
 
-                # Cutflow accumulation
-                cutflow_counts[1] += int(ak.sum(n_jets >= 1))
-                cutflow_counts[2] += int(ak.sum(n_jets >= min_jets))
+                    eta_abs = abs(corr.eta)
+                    jet_pass = {
+                        k: (v > jet_pt_cut) & (eta_abs < jet_eta_cut)
+                        for k, v in var_pt.items()
+                    }
+                    n_var = {k: ak.sum(m, axis=1) for k, m in jet_pass.items()}
+                    ht_var = {
+                        k: ak.sum(ak.where(jet_pass[k], var_pt[k], 0.0), axis=1)
+                        for k in var_pt
+                    }
+                    evt_pass = {
+                        k: (n_var[k] >= min_jets) & (ht_var[k] > ht_cut)
+                        for k in var_pt
+                    }
 
-                # Event-level selection: minimum jet multiplicity and HT floor.
-                event_mask = (n_jets >= min_jets) & (ht > ht_cut)
-                cutflow_counts[3] += int(ak.sum(event_mask))
+                    # selection_mode: "nominal" decides membership from the
+                    # central values; "loose_or" keeps an event (and a jet) if it
+                    # passes in nominal OR any stored variation, so systematic
+                    # migrations at the cut boundary are not lost.
+                    jet_keep = jet_pass["nominal"]
+                    keep = evt_pass["nominal"]
+                    if selection_mode == "loose_or":
+                        for k in var_pt:
+                            if k == "nominal":
+                                continue
+                            jet_keep = jet_keep | jet_pass[k]
+                            keep = keep | evt_pass[k]
 
-                jets = jets[event_mask]
-                ht = ht[event_mask]
+                    cutflow_counts[1] += int(ak.sum(n_var["nominal"] >= 1))
+                    cutflow_counts[2] += int(ak.sum(n_var["nominal"] >= min_jets))
+                    cutflow_counts[3] += int(ak.sum(keep))
 
+                    def _sel(arr, _jk=jet_keep, _k=keep):
+                        return arr[_jk][_k]
+
+                    def _f32(arr):
+                        return ak.values_astype(_sel(arr), np.float32)
+
+                    # eta, phi, jetArea, energies and multiplicities are unchanged
+                    # by JEC/JER; pt and m are replaced by the corrected values.
+                    jet_out = {}
+                    for f in ak.fields(jets):
+                        short_name = f[len("ScoutingPFJet_"):]
+                        if short_name in ("pt", "m"):
+                            continue
+                        jet_out[short_name] = _sel(jets[f])
+                    jet_out["pt"]         = _f32(corr.pt)
+                    jet_out["m"]          = _f32(corr.mass)
+                    jet_out["pt_raw"]     = _f32(corr.pt_raw)
+                    jet_out["m_raw"]      = _f32(corr.mass_raw)
+                    jet_out["pt_jesUp"]   = _f32(corr["JES_jes"].up.pt)
+                    jet_out["pt_jesDown"] = _f32(corr["JES_jes"].down.pt)
+                    jet_out["m_jesUp"]    = _f32(corr["JES_jes"].up.mass)
+                    jet_out["m_jesDown"]  = _f32(corr["JES_jes"].down.mass)
+                    if is_mc:
+                        jet_out["pt_jerUp"]   = _f32(corr["JER"].up.pt)
+                        jet_out["pt_jerDown"] = _f32(corr["JER"].down.pt)
+                        jet_out["m_jerUp"]    = _f32(corr["JER"].up.mass)
+                        jet_out["m_jerDown"]  = _f32(corr["JER"].down.mass)
+
+                    ht_out = ht_var["nominal"][keep]
+
+                # ---- Shared output assembly (uses the chosen event mask) ----
                 out_record = {}
-
                 for f in event_branches + optional_branches:
-                    out_record[f] = chunk[f][event_mask]
+                    out_record[f] = chunk[f][keep]
 
-                out_record["HT"] = ht
+                out_record["HT"] = ht_out
 
                 # Write all jet fields as a single nested branch so uproot creates
                 # one nScoutingPFJet count instead of a separate count per field.
                 # Fields are accessible as ScoutingPFJet.pt, ScoutingPFJet.eta, etc.
-                out_record["ScoutingPFJet"] = ak.zip({
-                    f[len("ScoutingPFJet_"):]: jets[f] for f in ak.fields(jets)
-                })
+                out_record["ScoutingPFJet"] = ak.zip(jet_out)
 
                 if gen_jet_branches:
-                    gen_jets = ak.zip({
-                        f[len("GenJet_"):]: chunk[f][event_mask]
+                    out_record["GenJet"] = ak.zip({
+                        f[len("GenJet_"):]: chunk[f][keep]
                         for f in gen_jet_branches
                     })
-                    out_record["GenJet"] = gen_jets
 
                 if gen_part_branches:
-                    gen_parts = ak.zip({
-                        f[len("GenPart_"):]: chunk[f][event_mask]
+                    out_record["GenPart"] = ak.zip({
+                        f[len("GenPart_"):]: chunk[f][keep]
                         for f in gen_part_branches
                     })
-                    out_record["GenPart"] = gen_parts
 
-                n_kept = int(ak.sum(event_mask))
+                n_kept = int(ak.sum(keep))
                 total_out += n_kept
 
                 if out_tree is None:
@@ -309,6 +462,8 @@ def slim(
                 "jet_pt_cut":  np.array([jet_pt_cut],  dtype=np.float32),
                 "jet_eta_cut": np.array([jet_eta_cut], dtype=np.float32),
                 "min_jets":    np.array([min_jets],    dtype=np.int32),
+                "corrections_enabled": np.array([1 if factory is not None else 0], dtype=np.int32),
+                "is_mc":               np.array([1 if is_mc else 0], dtype=np.int32),
             }
             out_file.mktree("meta", {name: arr.dtype for name, arr in meta_record.items()})
             out_file["meta"].extend(meta_record)
@@ -341,9 +496,24 @@ def main() -> None:
         "--output-tag", type=str, default="",
         help="Optional tag added to the output file name",
     )
+    corr_group = parser.add_mutually_exclusive_group()
+    corr_group.add_argument(
+        "--corrections", dest="corrections", action="store_true", default=None,
+        help="Force-enable JEC/JER corrections (needs a 'corrections' config block)",
+    )
+    corr_group.add_argument(
+        "--no-corrections", dest="corrections", action="store_false",
+        help="Disable JEC/JER corrections even if enabled in the config",
+    )
     args = parser.parse_args()
 
     cfg = load_config(args.config)
+
+    corr_cfg = cfg.get("corrections", {}) or {}
+    if args.corrections is None:
+        corrections_enabled = bool(corr_cfg.get("enabled", False))
+    else:
+        corrections_enabled = args.corrections
 
     if args.output_tag:
         output_path = "slimmed" + "_" + args.output_tag + "_" + os.path.basename(args.input)
@@ -357,6 +527,7 @@ def main() -> None:
         config_path=args.config,
         in_tree_name=args.tree,
         chunk_size=args.chunk_size,
+        corrections_enabled=corrections_enabled,
     )
 
 
