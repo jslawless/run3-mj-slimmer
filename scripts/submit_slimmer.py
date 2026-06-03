@@ -70,9 +70,24 @@ echo "Work Area: $workarea"
 ls
 echo
 
+## run3-mj-slimmer + coffea require Python >=3.10, but the worker's default
+## python3 is 3.9. Source a cvmfs LCG view to get python 3.11, then build an
+## ISOLATED venv: unset PYTHONPATH so the view's site-packages don't leak in and
+## our pip-installed coffea (not the view's) is used.
+LCG_BASE=/cvmfs/sft.cern.ch/lcg/views/LCG_106
+LCG_VIEW=$LCG_BASE/x86_64-el8-gcc11-opt/setup.sh
+if [ ! -r "$LCG_VIEW" ]; then
+  # Fall back to whatever arch dir this node matches under the same LCG version.
+  LCG_VIEW=$(ls "$LCG_BASE"/x86_64-el*-gcc*-opt/setup.sh 2>/dev/null | sort | tail -1)
+fi
+echo "Sourcing LCG view: $LCG_VIEW"
+source "$LCG_VIEW"
+echo "Base python: $(python3 --version)"
+
 ## Set up Python virtual environment and install run3-mj-slimmer
 python3 -m venv .venv
 source .venv/bin/activate
+unset PYTHONPATH
 pip install --quiet {WHEEL}
 
 ## Run
