@@ -52,6 +52,7 @@ RequestCPUs             = {cpu}
 +JobFlavour             = {queue}
 request_memory          = {ram}
 request_disk            = {disk}
+Requirements            = (OpSysMajorVer >= 9)
 
 queue name from (
 {names}
@@ -74,12 +75,21 @@ echo
 ## python3 is 3.9. Source a cvmfs LCG view to get python 3.11, then build an
 ## ISOLATED venv: unset PYTHONPATH so the view's site-packages don't leak in and
 ## our pip-installed coffea (not the view's) is used.
+##
+## IMPORTANT: pick the view matching THIS node's OS major version and the NEWEST
+## gcc available for it. correctionlib's PyPI wheels are built with gcc12+, whose
+## libstdc++ provides symbols (e.g. __cxa_call_terminate) that gcc11's lacks; an
+## el8-gcc11 view therefore makes `import correctionlib._core` fail. On el9 nodes
+## this selects el9-gcc13. Jobs are pinned to el9 in the submit file so the
+## newest available gcc is always >=13 (el8 only ships gcc11 under LCG_106).
 LCG_BASE=/cvmfs/sft.cern.ch/lcg/views/LCG_106
-LCG_VIEW=$LCG_BASE/x86_64-el8-gcc11-opt/setup.sh
-if [ ! -r "$LCG_VIEW" ]; then
-  # Fall back to whatever arch dir this node matches under the same LCG version.
-  LCG_VIEW=$(ls "$LCG_BASE"/x86_64-el*-gcc*-opt/setup.sh 2>/dev/null | sort | tail -1)
+osmaj=$(rpm -E %{{rhel}} 2>/dev/null || echo 9)
+LCG_VIEW=$(ls "$LCG_BASE"/x86_64-el${{osmaj}}-gcc*-opt/setup.sh 2>/dev/null | sort -V | tail -1)
+if [ -z "$LCG_VIEW" ] || [ ! -r "$LCG_VIEW" ]; then
+  # Last resort: newest gcc for any arch this node can run.
+  LCG_VIEW=$(ls "$LCG_BASE"/x86_64-el*-gcc*-opt/setup.sh 2>/dev/null | sort -V | tail -1)
 fi
+echo "Node OS major: $osmaj"
 echo "Sourcing LCG view: $LCG_VIEW"
 source "$LCG_VIEW"
 echo "Base python: $(python3 --version)"
