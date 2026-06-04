@@ -161,7 +161,15 @@ class JetCorrectionFactory:
         jets = ak.with_field(jets, _broadcast_rho(rho, jets_short.pt), "rho")
         if self.has_jer:
             jets = ak.with_field(jets, matched_gen_pt(jets_short, gen_jets), "pt_gen")
-        return self._factory.build(jets)
+        corrected = self._factory.build(jets)
+        # coffea 2024.x's CorrectedJetsFactory.build returns a dask_awkward array
+        # (npartitions=1) even from an eager input; the slimmer's chunk loop is
+        # eager, so materialize back to a plain awkward array here. dask's default
+        # synchronous scheduler needs no cluster. coffea 2025.x returned eager
+        # arrays directly, so the hasattr guard makes this a no-op there.
+        if hasattr(corrected, "compute"):
+            corrected = corrected.compute()
+        return corrected
 
     # -------------------------------------------------------------- internals
     @staticmethod
