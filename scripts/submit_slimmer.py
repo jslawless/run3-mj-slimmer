@@ -11,8 +11,10 @@ Build the wheel before submitting:
 To run with JEC/JER corrections, drop the JME .txt files into
 src/run3_mj_slimmer/data/jme/ BEFORE building the wheel: they are packaged into
 the wheel and resolved automatically on the worker node (no extra transfers).
-Each job then `pip install`s the wheel, which pulls coffea (a large dependency,
-hence the higher request_disk default).
+Each job installs the wheel with --no-deps into a venv that inherits the LCG
+view's coffea/correctionlib/uproot, so no large PyPI downloads happen on the
+worker (and the view's native correctionlib avoids the manylinux _core.so
+`undefined symbol: __cxa_call_terminate` ABI crash).
 
 Submit:
     python submit_slimmer.py \\
@@ -58,7 +60,6 @@ RequestCPUs             = {cpu}
 +JobFlavour             = {queue}
 request_memory          = {ram}
 request_disk            = {disk}
-Requirements            = (OpSysMajorVer >= 9)
 
 queue name from (
 {names}
@@ -77,17 +78,20 @@ echo "Work Area: $workarea"
 ls
 echo
 
-## run3-mj-slimmer + coffea require Python >=3.10, but the worker's default
-## python3 is 3.9. Source a cvmfs LCG view to get python 3.11, then build an
-## ISOLATED venv: unset PYTHONPATH so the view's site-packages don't leak in and
-## our pip-installed coffea (not the view's) is used.
+## run3-mj-slimmer needs Python >=3.10 (the bare worker has 3.9) plus coffea,
+## correctionlib, uproot, awkward - all already provided by the cvmfs LCG view,
+## compiled against the view's own gcc/libstdc++. So source the view and build a
+## venv that INHERITS its site-packages (--system-site-packages), then install
+## ONLY our package on top with --no-deps (see below).
 ##
-## IMPORTANT: pick the view matching THIS node's OS major version and the NEWEST
-## gcc available for it. correctionlib's PyPI wheels are built with gcc12+, whose
-## libstdc++ provides symbols (e.g. __cxa_call_terminate) that gcc11's lacks; an
-## el8-gcc11 view therefore makes `import correctionlib._core` fail. On el9 nodes
-## this selects el9-gcc13. Jobs are pinned to el9 in the submit file so the
-## newest available gcc is always >=13 (el8 only ships gcc11 under LCG_106).
+## Do NOT pip-install the deps: that pulls correctionlib's PyPI wheel, whose
+## prebuilt _core.so fails to load against the LCG runtime with
+## `undefined symbol: __cxa_call_terminate` - a wheel-vs-libstdc++ ABI mismatch
+## that bumping the view's gcc does NOT fix. The view's own correctionlib loads
+## fine (it matches its libstdc++), so we just use it. This also makes the job
+## OS-agnostic: on el8 or el9 the selected view's native libs always match.
+##
+## Pick the view matching this node's OS and the newest gcc available for it.
 LCG_BASE=/cvmfs/sft.cern.ch/lcg/views/LCG_106
 osmaj=$(rpm -E %{{rhel}} 2>/dev/null || echo 9)
 LCG_VIEW=$(ls "$LCG_BASE"/x86_64-el${{osmaj}}-gcc*-opt/setup.sh 2>/dev/null | sort -V | tail -1)
@@ -100,11 +104,13 @@ echo "Sourcing LCG view: $LCG_VIEW"
 source "$LCG_VIEW"
 echo "Base python: $(python3 --version)"
 
-## Set up Python virtual environment and install run3-mj-slimmer
-python3 -m venv .venv
+## Build a venv that inherits the view's packages; install ONLY our wheel, with
+## no PyPI deps. Do NOT unset PYTHONPATH - that is how the view exposes its
+## coffea/correctionlib to the venv.
+python3 -m venv --system-site-packages .venv
 source .venv/bin/activate
-unset PYTHONPATH
-pip install --quiet {WHEEL}
+pip install --quiet --no-deps {WHEEL}
+echo "coffea: $(python3 -c 'import coffea; print(coffea.__version__)')"
 
 ## Run
 echo
@@ -277,7 +283,7 @@ if __name__ == "__main__":
     parser.add_argument("--cpu",    type=int, default=1, help="CPUs per job")
     parser.add_argument("--queue",  default="tomorrow", help="HTCondor JobFlavour")
     parser.add_argument("--memory", default="4GB",      help="Memory per job")
-    parser.add_argument("--disk",   default="6GB",      help="Disk per job (coffea/numba venv is large)")
+    parser.add_argument("--disk",   default="4GB",      help="Disk per job (venv inherits LCG packages; mostly root-file I/O headroom)")
     parser.add_argument("--exec",   action="store_true", help="Submit jobs immediately after writing")
 
     args = parser.parse_args()

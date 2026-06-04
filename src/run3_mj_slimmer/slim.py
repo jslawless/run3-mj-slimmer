@@ -38,6 +38,17 @@ import boost_histogram as bh
 import numpy as np
 import uproot
 
+
+def _count(mask):
+    """Number of True entries in a flat boolean awkward array, as a Python int.
+
+    ``int(ak.sum(mask))`` works on newer awkward (the reducer returns a numpy
+    scalar) but raises ``TypeError: int() argument must be ... not 'Scalar'`` on
+    the LCG view's awkward, where a flat ``ak.sum`` returns an ``ak.Scalar``.
+    Reducing in NumPy is stable across both versions.
+    """
+    return int(np.count_nonzero(ak.to_numpy(mask)))
+
 # All per-jet ScoutingPFJet branches as they appear in ScoutingNanoAOD.
 # px, py, pz, e are NOT stored in the file; they are computed and added.
 SCOUTING_PF_JET_BRANCHES = [
@@ -304,10 +315,10 @@ def slim(
                     jets = jets[jet_mask]
                     n_jets = ak.num(jets["ScoutingPFJet_pt"])
                     ht = ak.sum(jets["ScoutingPFJet_pt"], axis=1)
-                    cutflow_counts[1] += int(ak.sum(n_jets >= 1))
-                    cutflow_counts[2] += int(ak.sum(n_jets >= min_jets))
+                    cutflow_counts[1] += _count(n_jets >= 1)
+                    cutflow_counts[2] += _count(n_jets >= min_jets)
                     keep = (n_jets >= min_jets) & (ht > ht_cut)
-                    cutflow_counts[3] += int(ak.sum(keep))
+                    cutflow_counts[3] += _count(keep)
                     jets = jets[keep]
                     ht_out = ht[keep]
                     jet_out = {
@@ -365,9 +376,9 @@ def slim(
                             jet_keep = jet_keep | jet_pass[k]
                             keep = keep | evt_pass[k]
 
-                    cutflow_counts[1] += int(ak.sum(n_var["nominal"] >= 1))
-                    cutflow_counts[2] += int(ak.sum(n_var["nominal"] >= min_jets))
-                    cutflow_counts[3] += int(ak.sum(keep))
+                    cutflow_counts[1] += _count(n_var["nominal"] >= 1)
+                    cutflow_counts[2] += _count(n_var["nominal"] >= min_jets)
+                    cutflow_counts[3] += _count(keep)
 
                     def _sel(arr, _jk=jet_keep, _k=keep):
                         return arr[_jk][_k]
@@ -423,7 +434,7 @@ def slim(
                         for f in gen_part_branches
                     })
 
-                n_kept = int(ak.sum(keep))
+                n_kept = _count(keep)
                 total_out += n_kept
 
                 if out_tree is None:
