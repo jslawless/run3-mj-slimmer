@@ -17,9 +17,14 @@ hence the higher request_disk default).
 Submit:
     python submit_slimmer.py \\
         -i fileset.json \\
-        -o root://cmseos.fnal.gov//store/user/you/slimmed \\
+        -o /store/user/you/slimmed \\
         --config config.json \\
         --wheel run3_mj_slimmer-1.0.0-py3-none-any.whl
+
+-o / --eosoutdir is a BARE EOS path (e.g. /store/user/you/slimmed); the job
+script adds the root://cmseos.fnal.gov/ redirector automatically. A full
+root://host//store/... URL is also accepted - the leading redirector is
+stripped so it is never doubled in the xrdcp destination.
 
 Fileset JSON format (coffea-style):
     {
@@ -33,6 +38,7 @@ Fileset JSON format (coffea-style):
 """
 
 import os
+import re
 import socket
 import argparse
 import json
@@ -262,7 +268,7 @@ if __name__ == "__main__":
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument("-i", "--inFile",   required=True,  help="Coffea-style fileset JSON")
-    parser.add_argument("-o", "--eosoutdir",   required=True,  help="EOS Output directory")
+    parser.add_argument("-o", "--eosoutdir",   required=True,  help="EOS output dir as a bare /store/... path (cmseos redirector added automatically)")
     parser.add_argument("--config",         required=True,  help="run3-mj-slimmer config JSON")
     parser.add_argument("--wheel",          required=True,  help="Pre-built run3-mj-slimmer .whl file")
     parser.add_argument("-n", "--nfPerJob", type=int, default=1, help="Files per job")
@@ -275,6 +281,12 @@ if __name__ == "__main__":
     parser.add_argument("--exec",   action="store_true", help="Submit jobs immediately after writing")
 
     args = parser.parse_args()
+
+    # The job template (EXECUTABLE_TEMPLATE) already prepends the cmseos.fnal.gov
+    # redirector to the output dir, so accept a bare /store/... path. If a full
+    # root://host//store/... URL is given, strip the leading redirector to avoid
+    # a doubled prefix in the xrdcp destination.
+    args.eosoutdir = re.sub(r"^root://[^/]+/+", "/", args.eosoutdir)
 
     fileset = Fileset(args)
     batch = Batch(fileset.jobs, args)
