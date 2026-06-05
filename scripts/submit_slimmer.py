@@ -78,6 +78,12 @@ echo "Work Area: $workarea"
 ls
 echo
 
+## The cvmfs LCG view points LC_* at a UTF-8 locale the minimal cms:rhel9
+## container lacks, so tools it runs (R/perl) warn "Setting LC_CTYPE failed,
+## using C". Force an always-present locale (C.UTF-8 is built into glibc on
+## el8/el9); re-asserted after sourcing the view in case it overrides LC_*.
+export LC_ALL=C.UTF-8 LANG=C.UTF-8 LC_CTYPE=C.UTF-8
+
 ## run3-mj-slimmer needs Python >=3.10 (the bare worker has 3.9) plus coffea,
 ## correctionlib, uproot, awkward - all already provided by the cvmfs LCG view,
 ## compiled against the view's own gcc/libstdc++. So source the view and build a
@@ -102,6 +108,7 @@ fi
 echo "Node OS major: $osmaj"
 echo "Sourcing LCG view: $LCG_VIEW"
 source "$LCG_VIEW"
+export LC_ALL=C.UTF-8 LANG=C.UTF-8 LC_CTYPE=C.UTF-8   # re-assert: the view may reset LC_*
 echo "Base python: $(python3 --version)"
 
 ## Build a venv that inherits the view's packages; install ONLY our wheel, with
@@ -114,12 +121,15 @@ echo "coffea: $(python3 -c 'import coffea; print(coffea.__version__)')"
 
 ## Run
 echo
-# mkdir -p output_files
+# Abort (non-zero exit, nothing uploaded) if any slimmer invocation fails, so
+# partial / empty outputs are never xrdcp'd to EOS.
+set -e
 {RUN_COMMANDS}
+set +e
 echo "what directory am I in?"
 pwd
 echo "List all root files = "
-ls *.root
+ls *.root 2>/dev/null || echo "  (no .root output produced)"
 echo "List all files"
 ls -alh
 echo "*******************************************"
@@ -129,21 +139,25 @@ echo "xrdcp output for condor to "
 
 EXECUTABLE_TEMPLATE2 ="""\
 echo $OUTDIR
-for FILE in *.root
+# Fail loudly (non-zero exit) if the slimmer delivered no output, instead of
+# the old confusing "xrdcp ... no such file" when the *.root glob is empty.
+shopt -s nullglob
+root_files=( *.root )
+if [[ ${#root_files[@]} -eq 0 ]]; then
+  echo "ERROR: slimmer produced no .root output - nothing to deliver to EOS." >&2
+  exit 1
+fi
+for FILE in "${root_files[@]}"
 do
   echo "xrdcp -f ${FILE} ${OUTDIR}/${FILE}"
-  echo "${FILE}" 
-  echo "${OUTDIR}"
- xrdcp -f ${FILE} ${OUTDIR}/${FILE} 2>&1
+  xrdcp -f "${FILE}" "${OUTDIR}/${FILE}" 2>&1
   XRDEXIT=$?
   if [[ $XRDEXIT -ne 0 ]]; then
-    rm *.root ###note if you do this locally you remove possibly IMPORTANT ROOT FILES
-    ### always be careful with "rm"
-    echo "exit code $XRDEXIT, failure in xrdcp"
+    echo "ERROR: xrdcp of ${FILE} failed (exit ${XRDEXIT}); output NOT delivered." >&2
+    rm -f -- "${FILE}"   # worker scratch only
     exit $XRDEXIT
   fi
-  rm ${FILE} ###note if you do this locally you remove possibly IMPORTANT ROOT FILES
-    ### always be careful with "rm"
+  rm -f -- "${FILE}"     # worker scratch only
 done
 
 echo

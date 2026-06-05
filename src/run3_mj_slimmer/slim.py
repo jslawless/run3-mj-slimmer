@@ -426,13 +426,21 @@ def slim(
                 n_kept = int(ak.sum(keep))
                 total_out += n_kept
 
-                if out_tree is None:
-                    out_file.mktree(
-                        "events",
-                        {name: arr.type for name, arr in out_record.items()},
-                    )
-                    out_tree = out_file["events"]
-                out_tree.extend(out_record)
+                # uproot's TTree.extend raises "zero-size array to reduction
+                # ... maximum" on a chunk with no kept events (empty jagged
+                # branches), so only create/extend the tree from non-empty
+                # chunks. If every chunk is empty (e.g. a low-HT QCD slice with
+                # nothing passing the HT cut) the events tree is simply absent -
+                # but the cutflow below is still written, which is what the
+                # analyzer needs for the N_original weight denominator.
+                if n_kept > 0:
+                    if out_tree is None:
+                        out_file.mktree(
+                            "events",
+                            {name: arr.type for name, arr in out_record.items()},
+                        )
+                        out_tree = out_file["events"]
+                    out_tree.extend(out_record)
 
                 print(
                     f"  {total_in:>10,} events read  |  {total_out:>10,} kept"
