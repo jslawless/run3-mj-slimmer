@@ -478,7 +478,7 @@ def slim(
 
     print(
         f"\nDone.   {total_in:,} events in  ->  {total_out:,} events out"
-        f"  ({100 * total_out / max(total_in, 1):.1f}%)"
+        f"  ({100 * total_out / total_in:.1f}%)"
     )
     print("Cutflow:")
     for label, count in zip(cutflow_labels, cutflow_counts):
