@@ -60,6 +60,7 @@ RequestCPUs             = {cpu}
 +JobFlavour             = {queue}
 request_memory          = {ram}
 request_disk            = {disk}
+use_x509userproxy       = true
 
 queue name from (
 {names}
